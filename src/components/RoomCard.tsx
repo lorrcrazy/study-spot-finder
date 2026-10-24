@@ -13,6 +13,7 @@ export function RoomCard({ school, rec, featured }: Props) {
   const building = school.buildings.find((b) => b.id === rec.room.buildingId)!
   const tone = busynessLabel(rec.busyness)
   const floorLabel = rec.room.floor === 'G' ? 'Ground floor' : `Floor ${rec.room.floor}`
+  const location = building.name.includes('Floor') ? building.name : `${building.name} · ${floorLabel}`
 
   if (!featured) {
     return (
@@ -20,7 +21,7 @@ export function RoomCard({ school, rec, featured }: Props) {
         <div className="min-w-0">
           <div className="truncate font-semibold">{rec.room.name}</div>
           <div className="truncate text-xs text-slate-500">
-            {building.name} · {floorLabel} · {rec.reasons[1]}
+            {location} · {rec.reasons[1]}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-3">
@@ -45,7 +46,7 @@ export function RoomCard({ school, rec, featured }: Props) {
         <div>
           <h2 className="text-3xl font-extrabold text-gt-navy">{rec.room.name}</h2>
           <p className="text-slate-600">
-            {building.name} · {floorLabel}
+            {location}
           </p>
         </div>
         <a
