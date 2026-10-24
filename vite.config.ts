@@ -13,7 +13,8 @@ const libcalProxy = (prefix: string, target: string): Record<string, ProxyOption
 
 const proxy = {
   ...libcalProxy('/libcal/gt', 'https://libcal.library.gatech.edu'),
-  ...libcalProxy('/libcal/arizona', 'https://libcal.library.arizona.edu'),
+  ...libcalProxy('/libcal/ksu', 'https://kennesaw.libcal.com'),
+  ...libcalProxy('/libcal/gsouthern', 'https://georgiasouthern.libcal.com'),
 }
 
 export default defineConfig({

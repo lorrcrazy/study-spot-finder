@@ -167,67 +167,123 @@ const georgiaTech: School = {
   ],
 }
 
-const azBuildings: Building[] = [
-  { id: 'az-a', name: 'Main Library · A Wing', x: 24, y: 40, floorNoise: {}, defaultNoise: 'quiet' },
-  { id: 'az-b', name: 'Main Library · B Wing', x: 52, y: 62, floorNoise: { '3': 'quiet' }, defaultNoise: 'moderate' },
-  { id: 'az-c', name: 'Main Library · C Wing', x: 78, y: 36, floorNoise: {}, defaultNoise: 'collaborative' },
+const roomFloor = (name: string) => name.match(/\d/)?.[0] ?? '1'
+
+// Kennesaw State and Georgia Southern: noise tags, events and max booking length are unverified estimates.
+const ksuBuildings: Building[] = [
+  { id: 'ksu-1', name: 'Sturgis · Floor 1', x: 30, y: 55, floorNoise: {}, defaultNoise: 'collaborative' },
+  { id: 'ksu-3', name: 'Sturgis · Floor 3', x: 70, y: 40, floorNoise: {}, defaultNoise: 'moderate' },
 ]
 
-const azRaw =
-  '26725:A316 26726:A317 26727:A318 26728:A319 26729:A320 26730:A321 26731:A322 26732:A323 26733:A324 ' +
-  '26734:A326 26735:A327 26736:A328 26737:A329 26738:A330 26739:A331 26740:A332 26741:A333 26742:A334 ' +
-  '26743:A335 26744:A336 26745:A337 26746:A338 26747:A339 26748:A340 26749:A341 26750:A342 26751:A343 ' +
-  '26752:A344 26753:A345 86073:B212 86076:B213 86077:B214 86078:B215 86081:B216 86082:B217 86083:B218 ' +
-  '86084:B219 86085:B220 86090:B221 86092:B222 86094:B223 86095:B224 86096:B225 86102:B228 86052:B229 ' +
-  '86104:B230 86106:B231 26463:B303 26464:B304 26465:B305 26466:B306 26467:B307 26468:B308 26469:B309 ' +
-  '26470:B310 26471:B311 26472:B312 26473:B313 26474:B319 26475:B320 26476:B322 26477:B324 10581:C302 ' +
-  '10580:C303 10582:C304 10583:C305 10584:C306 10585:C307 10586:C308 10587:C309 10588:C310 10589:C311 ' +
-  '10590:C312 10591:C313 10592:C314 10593:C315 15571:C316 10594:C317'
+const ksuRaw: [number, string, number][] = [
+  [74084, '114 Seminar/Study', 10],
+  [74094, '126 Tech Group Study', 4],
+  [74095, '127 Tech Group Study', 4],
+  [74096, '128 Tech Group Study', 4],
+  [74097, '129 Tech Group Study', 4],
+  [74098, '130 Tech Group Study', 4],
+  [74099, '131 Tech Group Study', 4],
+  [74092, '302A Group Study', 5],
+  [74091, '302B Group Study', 5],
+  [74090, '302C Group Study', 5],
+  [74089, '302D Group Study', 5],
+  [74088, '302E Group Study', 5],
+  [74087, '302G Group Study', 2],
+  [74086, '302H Group Study', 2],
+  [74085, '302J Group Study', 2],
+]
 
-const arizona: School = {
-  id: 'arizona',
-  name: 'University of Arizona Main Library',
-  shortName: 'U of Arizona',
-  libcalBase: 'https://libcal.library.arizona.edu',
-  proxyPrefix: '/libcal/arizona',
-  lid: 801,
-  gid: 1393,
-  timeZone: 'America/Phoenix',
+const kennesaw: School = {
+  id: 'ksu',
+  name: 'Kennesaw State · Sturgis Library',
+  shortName: 'Kennesaw State',
+  libcalBase: 'https://kennesaw.libcal.com',
+  proxyPrefix: '/libcal/ksu',
+  lid: 10524,
+  gid: 19509,
+  timeZone: 'America/New_York',
   maxBookingMin: 120,
-  buildings: azBuildings,
+  buildings: ksuBuildings,
   rooms: withNoise(
-    azBuildings,
-    azRaw.split(' ').map((entry) => {
-      const [eid, code] = entry.split(':')
-      return {
-        eid: Number(eid),
-        name: `Main Library ${code}`,
-        capacity: 2,
-        buildingId: `az-${code.charAt(0).toLowerCase()}`,
-        floor: code.charAt(1),
-      }
+    ksuBuildings,
+    ksuRaw.map(([eid, label, capacity]) => {
+      const floor = roomFloor(label)
+      return { eid, name: `Sturgis ${label.split(' ')[0]}`, capacity, buildingId: `ksu-${floor}`, floor }
     }),
   ),
   events: [
     {
-      id: 'az-1',
-      title: 'Wildcat Study Jam',
-      location: 'Main Library, C Wing',
-      nearBuildingIds: ['az-c'],
-      startOffsetMin: -20,
+      id: 'ksu-1',
+      title: 'Owl Study Hall',
+      location: 'Sturgis Library, Floor 1',
+      nearBuildingIds: ['ksu-1'],
+      startOffsetMin: -15,
       durationMin: 120,
-      size: 'large',
-    },
-    {
-      id: 'az-2',
-      title: 'Writing Center Drop-in',
-      location: 'Main Library, B Wing',
-      nearBuildingIds: ['az-b'],
-      startOffsetMin: 30,
-      durationMin: 90,
-      size: 'small',
+      size: 'medium',
     },
   ],
 }
 
-export const SCHOOLS: School[] = [georgiaTech, arizona]
+const gsBuildings: Building[] = [
+  { id: 'gs-1', name: 'Henderson · Floor 1', x: 30, y: 45, floorNoise: {}, defaultNoise: 'moderate' },
+  { id: 'gs-3', name: 'Henderson · Floor 3', x: 70, y: 55, floorNoise: {}, defaultNoise: 'quiet' },
+]
+
+const gsRaw: [number, string, number][] = [
+  [49912, '1202 A', 2],
+  [49781, '1202 B (DVD Viewing)', 2],
+  [49775, '1202 C', 2],
+  [49776, '1202 D', 2],
+  [49777, '1202 E', 2],
+  [49778, '1202 F', 2],
+  [49779, '1202 G', 2],
+  [49780, '1202 H', 2],
+  [49782, '1202 J', 2],
+  [49783, '1202 K', 2],
+  [49913, '1208 A', 2],
+  [49915, '1208 B', 2],
+  [49916, '1208 C', 2],
+  [49917, '1212 A', 6],
+  [49918, '1212 B', 6],
+  [75539, '3102 A', 2],
+  [75538, '3102 B', 2],
+  [152507, '3302 A', 1],
+  [75534, '3302 B', 2],
+  [75535, '3302 C', 2],
+  [75536, '3302 D', 2],
+  [75537, '3302 E', 2],
+  [219617, 'Zen Garden Pod', 1],
+]
+
+const georgiaSouthern: School = {
+  id: 'gsouthern',
+  name: 'Georgia Southern · Henderson Library',
+  shortName: 'Georgia Southern',
+  libcalBase: 'https://georgiasouthern.libcal.com',
+  proxyPrefix: '/libcal/gsouthern',
+  lid: 2839,
+  gid: 12909,
+  timeZone: 'America/New_York',
+  maxBookingMin: 120,
+  buildings: gsBuildings,
+  rooms: withNoise(
+    gsBuildings,
+    gsRaw.map(([eid, label, capacity]) => {
+      const floor = roomFloor(label)
+      return { eid, name: `Henderson ${label}`, capacity, buildingId: `gs-${floor}`, floor }
+    }),
+  ),
+  events: [
+    {
+      id: 'gs-1',
+      title: 'Eagle Exam Cram',
+      location: 'Henderson Library, Floor 1',
+      nearBuildingIds: ['gs-1'],
+      startOffsetMin: 30,
+      durationMin: 120,
+      size: 'large',
+    },
+  ],
+}
+
+export const SCHOOLS: School[] = [georgiaTech, kennesaw, georgiaSouthern]
