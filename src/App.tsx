@@ -13,7 +13,7 @@ const NOISE_OPTIONS: { value: Noise; label: string }[] = [
   { value: 'moderate', label: 'Some chatter OK' },
   { value: 'collaborative', label: 'Group work' },
 ]
-const DURATIONS = [30, 60, 120, 180, 240]
+const SLOT_MIN = 15
 const SIZES: EventSize[] = ['small', 'medium', 'large']
 
 function seedEvents(school: School): LiveEvent[] {
@@ -27,7 +27,11 @@ function seedEvents(school: School): LiveEvent[] {
 const initialSchool = SCHOOLS.find((s) => s.id === new URLSearchParams(window.location.search).get('school')) ?? SCHOOLS[0]
 
 const floorName = (floor: string) => (floor === 'G' ? 'Ground' : `Floor ${floor}`)
-const durationLabel = (min: number) => (min < 60 ? `${min} min` : `${min / 60} hr`)
+const durationLabel = (min: number) => {
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return [h ? `${h} hr` : '', m ? `${m} min` : ''].filter(Boolean).join(' ')
+}
 
 export default function App() {
   const [schoolId, setSchoolId] = useState(initialSchool.id)
@@ -175,21 +179,19 @@ export default function App() {
                   className="mt-1 w-full accent-[#003057]"
                 />
               </label>
-              <div>
-                <div className="mb-1 text-sm font-medium">How long?</div>
-                <div className="grid grid-cols-3 gap-1">
-                  {DURATIONS.filter((d) => d <= school.maxBookingMin).map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => setPrefs((p) => ({ ...p, durationMin: d }))}
-                      className={`rounded-md py-1.5 text-xs font-semibold ${prefs.durationMin === d ? 'bg-gt-gold text-gt-navy' : 'bg-slate-100 hover:bg-slate-200'}`}
-                    >
-                      {durationLabel(d)}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-1 text-xs text-slate-500">Max booking at {school.shortName}: {durationLabel(school.maxBookingMin)}</p>
-              </div>
+              <label className="block text-sm">
+                <span className="font-medium">How long? {durationLabel(prefs.durationMin)}</span>
+                <input
+                  type="range"
+                  min={SLOT_MIN}
+                  max={school.maxBookingMin}
+                  step={SLOT_MIN}
+                  value={prefs.durationMin}
+                  onChange={(e) => setPrefs((p) => ({ ...p, durationMin: Number(e.target.value) }))}
+                  className="mt-1 w-full accent-[#003057]"
+                />
+                <p className="mt-1 text-xs text-slate-500">Max booking at {school.shortName}: {durationLabel(school.maxBookingMin)} · {SLOT_MIN}-min slots</p>
+              </label>
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
