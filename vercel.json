@@ -1,0 +1,3 @@
+{
+  "rewrites": [{ "source": "/libcal/:school/:path*", "destination": "/api/libcal?school=:school&path=:path*" }]
+}
