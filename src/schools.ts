@@ -38,6 +38,7 @@ export interface School {
   lid: number
   gid: number
   timeZone: string
+  maxBookingMin: number
   buildings: Building[]
   rooms: Room[]
   events: SeedEvent[]
@@ -126,6 +127,7 @@ const georgiaTech: School = {
   lid: 18640,
   gid: 39399,
   timeZone: 'America/New_York',
+  maxBookingMin: 120,
   buildings: gtBuildings,
   rooms: withNoise(
     gtBuildings,
@@ -191,6 +193,7 @@ const arizona: School = {
   lid: 801,
   gid: 1393,
   timeZone: 'America/Phoenix',
+  maxBookingMin: 120,
   buildings: azBuildings,
   rooms: withNoise(
     azBuildings,

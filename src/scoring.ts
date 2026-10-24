@@ -1,4 +1,4 @@
-import { diffMinutes, formatTime } from './libcal'
+import { addMinutes, diffMinutes, formatTime } from './libcal'
 import type { RoomStatus } from './libcal'
 import type { EventSize, Noise, Room, School } from './schools'
 
@@ -124,15 +124,16 @@ export function recommend(
     if (!status?.freeNow || room.capacity < prefs.groupSize) continue
     const building = buildingStats.get(room.buildingId)!
     const busyness = building.floors.find((f) => f.floor === room.floor)?.busyness ?? building.busyness
-    const covers = status.freeMinutes >= prefs.durationMin
-    const durationScore = covers ? 20 : Math.round((20 * status.freeMinutes) / prefs.durationMin) - 10
+    const wanted = Math.min(prefs.durationMin, school.maxBookingMin)
+    const covers = status.freeMinutes >= wanted
+    const durationScore = covers ? 20 : Math.round((20 * status.freeMinutes) / wanted) - 10
     const waste = Math.min(15, (room.capacity - prefs.groupSize) * 1.5)
     const score = 100 - busyness * 0.9 + NOISE_MATCH[prefs.noise][room.noise] + durationScore - waste
 
     const reasons = [
       NOISE_LABEL[room.noise],
       covers
-        ? `Free until ${formatTime(status.freeUntil!)}`
+        ? `Free until ${formatTime(status.freeUntil!)} · book up to ${formatTime(addMinutes(status.freeFrom!, Math.min(status.freeMinutes, school.maxBookingMin)))}`
         : `Only free ${status.freeMinutes} min (until ${formatTime(status.freeUntil!)})`,
       `Floor is ${busynessLabel(busyness).label.toLowerCase()} (${busyness}% busy)`,
       `Fits ${room.capacity}`,

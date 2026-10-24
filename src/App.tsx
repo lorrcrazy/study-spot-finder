@@ -13,7 +13,7 @@ const NOISE_OPTIONS: { value: Noise; label: string }[] = [
   { value: 'moderate', label: 'Some chatter OK' },
   { value: 'collaborative', label: 'Group work' },
 ]
-const DURATIONS = [30, 60, 120, 180]
+const DURATIONS = [30, 60, 120, 180, 240]
 const SIZES: EventSize[] = ['small', 'medium', 'large']
 
 function seedEvents(school: School): LiveEvent[] {
@@ -75,6 +75,7 @@ export default function App() {
 
   const switchSchool = (next: School) => {
     setSchoolId(next.id)
+    setPrefs((p) => ({ ...p, durationMin: Math.min(p.durationMin, next.maxBookingMin) }))
     setEvents(seedEvents(next))
     setNewEvent((e) => ({ ...e, buildingId: next.buildings[0].id }))
   }
@@ -176,8 +177,8 @@ export default function App() {
               </label>
               <div>
                 <div className="mb-1 text-sm font-medium">How long?</div>
-                <div className="grid grid-cols-4 gap-1">
-                  {DURATIONS.map((d) => (
+                <div className="grid grid-cols-3 gap-1">
+                  {DURATIONS.filter((d) => d <= school.maxBookingMin).map((d) => (
                     <button
                       key={d}
                       onClick={() => setPrefs((p) => ({ ...p, durationMin: d }))}
@@ -187,6 +188,7 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                <p className="mt-1 text-xs text-slate-500">Max booking at {school.shortName}: {durationLabel(school.maxBookingMin)}</p>
               </div>
               <label className="flex items-center gap-2 text-sm">
                 <input
