@@ -1,3 +1,4 @@
+import { addDays, dayLabel, formatTime, weekday } from './libcal'
 import type { Prefs } from './scoring'
 import type { Noise, School } from './schools'
 
@@ -91,9 +92,108 @@ function parseBuildings(text: string, school: School): { prefer?: string | null;
   return result
 }
 
-export function interpretLocally(message: string, school: School): Interpretation {
-  const text = message.toLowerCase().replace(/[’']/g, "'")
+const DAY_INDEX: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
+const pad = (n: number) => String(n).padStart(2, '0')
+
+interface WhenParse {
+  date?: string
+  time?: string
+  note?: string
+  rest: string
+}
+
+// Pulls day/time phrases out of the message so the other parsers don't misread "at 3" as a group size.
+function parseWhen(input: string, school: School, now: string): WhenParse {
+  let text = input
+  const today = now.slice(0, 10)
+  const eat = (re: RegExp) => {
+    const m = text.match(re)
+    if (m) text = text.replace(m[0], ' ')
+    return m
+  }
+  let date: string | undefined
+  let time: string | undefined
+  let m: RegExpMatchArray | null
+
+  if (eat(/\b(?:right now|asap|immediately|now)\b/)) {
+    date = today
+    time = 'now'
+  }
+  if (eat(/\btonight\b/)) {
+    date = today
+    time = '19:00'
+  }
+  if (eat(/\blater today\b/)) {
+    date = today
+    time = 'any'
+  }
+  if (eat(/\bday after tomorrow\b/)) date = addDays(today, 2)
+  if (!date && eat(/\b(?:tomorrow|tmrw|tmr|tmrw)\b/)) date = addDays(today, 1)
+  if (!date && eat(/\btoday\b/)) date = today
+  if (!date && (m = eat(new RegExp(`\\bin ${NUM} days?\\b`)))) date = addDays(today, num(m[1]))
+  if (!date && eat(/\b(?:in a week|next week|a week from (?:now|today))\b/)) date = addDays(today, 7)
+  if (!date && (m = eat(/\b(next |this |on )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday|sun|mon|tues?|wed|weds|thu|thur|thurs|fri|sat)\b/))) {
+    let diff = (DAY_INDEX[m[2].slice(0, 3)] - weekday(today) + 7) % 7
+    if (m[1] === 'next ' && diff === 0) diff = 7
+    date = addDays(today, diff)
+  }
+  const year = Number(today.slice(0, 4))
+  const fromParts = (month: number, day: number) => {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return undefined
+    const d = `${year}-${pad(month)}-${pad(day)}`
+    return d < today ? `${year + 1}-${pad(month)}-${pad(day)}` : d
+  }
+  if (!date && (m = eat(new RegExp(`\\b(${MONTHS.join('|')})[a-z]*\\.? (\\d{1,2})(?:st|nd|rd|th)?\\b`)))) date = fromParts(MONTHS.indexOf(m[1]) + 1, Number(m[2]))
+  if (!date && (m = eat(/\b(\d{1,2})\/(\d{1,2})\b/))) date = fromParts(Number(m[1]), Number(m[2]))
+  if (!date && (m = eat(/\b(?:on )?the (\d{1,2})(?:st|nd|rd|th)\b/))) {
+    const month = Number(today.slice(5, 7))
+    const day = Number(m[1])
+    const d = `${year}-${pad(month)}-${pad(day)}`
+    date = d >= today ? d : fromParts((month % 12) + 1, day)
+  }
+
+  const setTime = (hour: number, minute: number, meridiem?: string) => {
+    if (meridiem === 'p' && hour < 12) hour += 12
+    if (meridiem === 'a' && hour === 12) hour = 0
+    if (!meridiem && hour >= 1 && hour <= 7) hour += 12
+    if (hour > 23 || minute > 59) return
+    const total = hour * 60 + minute
+    const rounded = Math.floor(total / school.slotMin) * school.slotMin
+    time = `${pad(Math.floor(rounded / 60))}:${pad(rounded % 60)}`
+  }
+  if (!time) {
+    if (eat(/\bnoon\b/)) setTime(12, 0, 'p')
+    else if ((m = eat(/\b(?:at |around |by |from |after |starting )?(\d{1,2})(?::(\d{2}))? ?([ap])\.?m\.?(?![a-z])/))) setTime(Number(m[1]), Number(m[2] ?? 0), m[3])
+    else if ((m = eat(/\b(?:at|around|after|from|starting at) (\d{1,2})(?::(\d{2}))?\b(?! ?(?:h|hr|hrs|hours?|m|min|mins|minutes|people|of us|friends|ppl)\b)/))) setTime(Number(m[1]), Number(m[2] ?? 0))
+    else if ((m = eat(/\b(\d{1,2}):(\d{2})\b/))) setTime(Number(m[1]), Number(m[2]))
+  }
+  if ((m = eat(/\b(this )?(morning|afternoon|evening)\b/))) {
+    if (m[1]) date ??= today
+    if (!time) time = { morning: '09:00', afternoon: '14:00', evening: '18:00' }[m[2]]
+  }
+  if (date && !time) time = 'any'
+
+  let note: string | undefined
+  const lastDay = addDays(today, school.bookAheadDays)
+  if (date && date > lastDay) {
+    note = `${school.shortName} only lets you book ${school.bookAheadDays} days ahead (through ${dayLabel(lastDay, today)}), so I can't look that far out.`
+    date = undefined
+    if (time !== 'now') time = undefined
+  }
+  if (time && /^\d/.test(time) && date === today && `${today} ${time}:00` <= now) {
+    note = `${formatTime(`${today} ${time}:00`)} already passed today, so I looked at right now.`
+    time = 'now'
+  }
+  return { date, time, note, rest: text }
+}
+
+export function interpretLocally(message: string, school: School, now: string): Interpretation {
+  const when = parseWhen(message.toLowerCase().replace(/[’']/g, "'"), school, now)
+  const text = when.rest
   const patch: PrefsPatch = {}
+  if (when.date) patch.date = when.date
+  if (when.time) patch.time = when.time
   const groupSize = parseGroup(text)
   if (groupSize) patch.groupSize = groupSize
   const noise = parseNoise(text)
@@ -101,10 +201,10 @@ export function interpretLocally(message: string, school: School): Interpretatio
   else if (groupSize && groupSize >= 3) patch.noise = 'collaborative'
   else if (groupSize === 1) patch.noise = 'quiet'
   const duration = parseDuration(text, school)
-  let note: string | undefined
+  let note = when.note
   if (duration) {
     patch.durationMin = fitDuration(duration, school)
-    if (duration > school.maxBookingMin) note = `${school.shortName} caps bookings at ${durationLabel(school.maxBookingMin)}, so I used that.`
+    if (duration > school.maxBookingMin) note = [note, `${school.shortName} caps bookings at ${durationLabel(school.maxBookingMin)}, so I used that.`].filter(Boolean).join(' ')
   }
   const { prefer, avoid } = parseBuildings(text, school)
   if (prefer !== undefined) patch.preferBuildingId = prefer
@@ -113,7 +213,7 @@ export function interpretLocally(message: string, school: School): Interpretatio
   return { patch, note, source: 'local' }
 }
 
-export async function interpret(message: string, school: School, prefs: Prefs): Promise<Interpretation> {
+export async function interpret(message: string, school: School, prefs: Prefs, now: string): Promise<Interpretation> {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8000)
@@ -124,7 +224,10 @@ export async function interpret(message: string, school: School, prefs: Prefs): 
       body: JSON.stringify({
         message,
         prefs,
+        now,
+        weekday: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][weekday(now.slice(0, 10))],
         school: {
+          bookAheadDays: school.bookAheadDays,
           name: school.name,
           maxBookingMin: school.maxBookingMin,
           slotMin: school.slotMin,
@@ -143,8 +246,13 @@ export async function interpret(message: string, school: School, prefs: Prefs): 
     if (data.preferBuildingId === null || (data.preferBuildingId && ids.has(data.preferBuildingId))) patch.preferBuildingId = data.preferBuildingId
     if (data.avoidBuildingId === null || (data.avoidBuildingId && ids.has(data.avoidBuildingId))) patch.avoidBuildingId = data.avoidBuildingId
     if (typeof data.finals === 'boolean') patch.finals = data.finals
+    const today = now.slice(0, 10)
+    if (typeof data.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(data.date) && data.date >= today && data.date <= addDays(today, school.bookAheadDays)) {
+      patch.date = data.date
+    }
+    if (typeof data.time === 'string' && /^(now|any|\d{2}:\d{2})$/.test(data.time)) patch.time = data.time
     return { patch, note: data.note, source: 'ai' }
   } catch {
-    return interpretLocally(message, school)
+    return interpretLocally(message, school, now)
   }
 }

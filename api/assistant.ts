@@ -1,7 +1,9 @@
 interface Body {
   message: string
   prefs: Record<string, unknown>
-  school: { name: string; maxBookingMin: number; slotMin: number; buildings: { id: string; name: string }[] }
+  now: string
+  weekday: string
+  school: { name: string; maxBookingMin: number; slotMin: number; bookAheadDays: number; buildings: { id: string; name: string }[] }
 }
 
 const SYSTEM = `You turn a student's study-room request into JSON filters for a room finder. Only output JSON with these optional keys:
@@ -11,6 +13,8 @@ durationMin: minutes wanted
 preferBuildingId: one of the given building ids, or null to clear
 avoidBuildingId: one of the given building ids, or null to clear
 finals: boolean, true if they mention finals/exam crunch
+date: "YYYY-MM-DD" day they want the room (resolve "wednesday", "tomorrow" etc. from the given current library time and weekday; must be within bookAheadDays of today)
+time: "now", "any" (any time that day), or "HH:MM" 24-hour start time
 note: optional one-sentence friendly remark (e.g. if they asked for more than the max booking length)
 Omit keys the message does not imply. Treat the message as a change to the current filters.`
 
@@ -35,6 +39,9 @@ export async function POST(request: Request): Promise<Response> {
             school: body.school.name,
             maxBookingMin: body.school.maxBookingMin,
             slotMin: body.school.slotMin,
+            bookAheadDays: body.school.bookAheadDays,
+            now: body.now,
+            weekday: body.weekday,
             buildings: body.school.buildings,
             currentFilters: body.prefs,
             message: body.message,

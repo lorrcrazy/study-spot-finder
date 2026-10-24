@@ -37,7 +37,22 @@ const fromDate = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ')
 export const addMinutes = (ts: string, minutes: number) => fromDate(new Date(toDate(ts).getTime() + minutes * 60000))
 export const diffMinutes = (from: string, to: string) => Math.round((toDate(to).getTime() - toDate(from).getTime()) / 60000)
 
-export const bookingUrl = (school: School, eid: number) => `${school.libcalBase}/space/${eid}`
+export const bookingUrl = (school: School, eid: number, date?: string) =>
+  `${school.libcalBase}/space/${eid}${date ? `?date=${date}` : ''}`
+
+export const addDays = (date: string, days: number) => addMinutes(`${date} 00:00:00`, days * 24 * 60).slice(0, 10)
+
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+export const weekday = (date: string) => toDate(`${date} 00:00:00`).getUTCDay()
+
+export function dayLabel(date: string, today: string): string {
+  if (date === today) return 'Today'
+  if (date === addDays(today, 1)) return 'Tomorrow'
+  const d = toDate(`${date} 00:00:00`)
+  return `${WEEKDAY_SHORT[d.getUTCDay()]}, ${MONTH_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}`
+}
 
 export function formatTime(ts: string): string {
   const [h, m] = ts.slice(11, 16).split(':').map(Number)
@@ -46,8 +61,7 @@ export function formatTime(ts: string): string {
   return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, '0')} ${suffix}`
 }
 
-export async function fetchLiveAvailability(school: School): Promise<Availability> {
-  const today = nowInTz(school.timeZone).slice(0, 10)
+export async function fetchLiveAvailability(school: School, date: string): Promise<Availability> {
   const body = new URLSearchParams({
     lid: String(school.lid),
     gid: String(school.gid),
@@ -55,8 +69,8 @@ export async function fetchLiveAvailability(school: School): Promise<Availabilit
     seat: '0',
     seatId: '0',
     zone: '0',
-    start: today,
-    end: addMinutes(`${today} 00:00:00`, 24 * 60).slice(0, 10),
+    start: date,
+    end: addDays(date, 1),
     pageIndex: '0',
     pageSize: '500',
   })
@@ -87,9 +101,8 @@ function seededRandom(seed: number) {
   }
 }
 
-export function mockAvailability(school: School): Availability {
-  const today = nowInTz(school.timeZone).slice(0, 10)
-  const daySeed = Number(today.replaceAll('-', ''))
+export function mockAvailability(school: School, date: string): Availability {
+  const daySeed = Number(date.replaceAll('-', ''))
   const availability: Availability = new Map()
   for (const room of school.rooms) {
     const random = seededRandom(room.eid * 31 + daySeed)
@@ -99,7 +112,7 @@ export function mockAvailability(school: School): Availability {
     const perHour = 60 / step
     for (let i = 8 * perHour; i < 24 * perHour; i++) {
       if (bookedRemaining === 0 && random() < 0.1) bookedRemaining = Math.ceil((60 + random() * 120) / step)
-      const start = addMinutes(`${today} 00:00:00`, i * step)
+      const start = addMinutes(`${date} 00:00:00`, i * step)
       slots.push({ start, end: addMinutes(start, step), booked: bookedRemaining > 0 })
       if (bookedRemaining > 0) bookedRemaining--
     }
@@ -110,18 +123,27 @@ export function mockAvailability(school: School): Availability {
 
 const FREE_NOW_GRACE_MIN = 20
 
-export function roomStatus(slots: Slot[] | undefined, now: string): RoomStatus {
+const none: RoomStatus = { freeNow: false, freeFrom: null, freeUntil: null, freeMinutes: 0 }
+
+// Free block starting at/after `from`. Flexible mode picks the first block long enough for `minMinutes` (any time that day).
+export function roomStatus(slots: Slot[] | undefined, from: string, opts: { flexible?: boolean; minMinutes?: number } = {}): RoomStatus {
   const sorted = [...(slots ?? [])].sort((a, b) => a.start.localeCompare(b.start))
-  const first = sorted.findIndex((s) => !s.booked && s.end > now)
-  if (first === -1) return { freeNow: false, freeFrom: null, freeUntil: null, freeMinutes: 0 }
-  let last = first
-  while (last + 1 < sorted.length && !sorted[last + 1].booked && sorted[last + 1].start === sorted[last].end) last++
-  const freeFrom = sorted[first].start > now ? sorted[first].start : now
-  const freeUntil = sorted[last].end
+  const blocks: { start: string; end: string }[] = []
+  for (const slot of sorted) {
+    if (slot.booked || slot.end <= from) continue
+    const last = blocks[blocks.length - 1]
+    if (last && last.end === slot.start) last.end = slot.end
+    else blocks.push({ start: slot.start > from ? slot.start : from, end: slot.end })
+  }
+  if (blocks.length === 0) return none
+  const length = (b: { start: string; end: string }) => diffMinutes(b.start, b.end)
+  const block = opts.flexible
+    ? (blocks.find((b) => length(b) >= (opts.minMinutes ?? 0)) ?? blocks.reduce((a, b) => (length(b) > length(a) ? b : a)))
+    : blocks[0]
   return {
-    freeNow: diffMinutes(now, freeFrom) <= FREE_NOW_GRACE_MIN,
-    freeFrom,
-    freeUntil,
-    freeMinutes: diffMinutes(freeFrom, freeUntil),
+    freeNow: opts.flexible ? true : diffMinutes(from, block.start) <= FREE_NOW_GRACE_MIN,
+    freeFrom: block.start,
+    freeUntil: block.end,
+    freeMinutes: length(block),
   }
 }

@@ -1,5 +1,5 @@
-import { addMinutes, diffMinutes, formatTime } from './libcal'
-import type { RoomStatus } from './libcal'
+import { addMinutes, dayLabel, diffMinutes, formatTime, roomStatus } from './libcal'
+import type { Availability, RoomStatus } from './libcal'
 import type { EventSize, Noise, Room, School } from './schools'
 
 export interface Prefs {
@@ -9,6 +9,43 @@ export interface Prefs {
   finals: boolean
   preferBuildingId?: string | null
   avoidBuildingId?: string | null
+  // Library-local YYYY-MM-DD
+  date: string
+  // 'now', 'any' (any time that day), or 'HH:MM'
+  time: string
+}
+
+export interface When {
+  date: string
+  // Search for free blocks starting here
+  from: string
+  // Reference time for busyness and events
+  ref: string
+  flexible: boolean
+  isNow: boolean
+}
+
+export function resolveWhen(prefs: Pick<Prefs, 'date' | 'time'>, now: string): When {
+  const today = now.slice(0, 10)
+  const date = prefs.date < today ? today : prefs.date
+  if (prefs.time === 'any' || (prefs.time === 'now' && date !== today)) {
+    return {
+      date,
+      from: date === today ? now : `${date} 08:00:00`,
+      ref: date === today ? now : `${date} 12:00:00`,
+      flexible: true,
+      isNow: false,
+    }
+  }
+  const at = prefs.time === 'now' ? now : `${date} ${prefs.time}:00`
+  return at <= now ? { date, from: now, ref: now, flexible: false, isNow: true } : { date, from: at, ref: at, flexible: false, isNow: false }
+}
+
+export function whenLabel(when: When, today: string): string {
+  if (when.isNow) return 'right now'
+  const day = dayLabel(when.date, today)
+  if (when.flexible) return when.date === today ? 'later today' : day
+  return `${day === 'Today' ? 'today' : day} at ${formatTime(when.from)}`
 }
 
 export interface LiveEvent {
@@ -46,6 +83,14 @@ export interface Recommendation {
   busyness: number
   reasons: string[]
   warnings: string[]
+}
+
+function freeText(status: RoomStatus, school: School, covers: boolean, isNow: boolean) {
+  const from = formatTime(status.freeFrom!)
+  const until = formatTime(status.freeUntil!)
+  const bookEnd = formatTime(addMinutes(status.freeFrom!, Math.min(status.freeMinutes, school.maxBookingMin)))
+  if (!covers) return isNow ? `Only free ${status.freeMinutes} min (until ${until})` : `Only free ${from}–${until}`
+  return isNow ? `Free until ${until} · book up to ${bookEnd}` : `Free ${from}–${until} · book ${from}–${bookEnd}`
 }
 
 const EVENT_WEIGHT: Record<EventSize, number> = { small: 10, medium: 20, large: 35 }
@@ -119,6 +164,7 @@ export function recommend(
   statuses: Map<number, RoomStatus>,
   buildingStats: Map<string, BuildingStats>,
   prefs: Prefs,
+  when?: When,
 ): Recommendation[] {
   const results: Recommendation[] = []
   for (const room of school.rooms) {
@@ -135,9 +181,7 @@ export function recommend(
 
     const reasons = [
       NOISE_LABEL[room.noise],
-      covers
-        ? `Free until ${formatTime(status.freeUntil!)} · book up to ${formatTime(addMinutes(status.freeFrom!, Math.min(status.freeMinutes, school.maxBookingMin)))}`
-        : `Only free ${status.freeMinutes} min (until ${formatTime(status.freeUntil!)})`,
+      freeText(status, school, covers, !when || when.isNow),
       `Floor is ${busynessLabel(busyness).label.toLowerCase()} (${busyness}% busy)`,
       `Fits ${room.capacity}`,
     ]
@@ -145,4 +189,16 @@ export function recommend(
     results.push({ room, status, score, busyness, reasons, warnings })
   }
   return results.sort((a, b) => b.score - a.score)
+}
+
+export function evaluate(school: School, availability: Availability, events: LiveEvent[], prefs: Prefs, now: string) {
+  const when = resolveWhen(prefs, now)
+  const minMinutes = Math.min(prefs.durationMin, school.maxBookingMin)
+  const statuses = new Map<number, RoomStatus>()
+  for (const room of school.rooms) {
+    statuses.set(room.eid, roomStatus(availability.get(room.eid), when.from, { flexible: when.flexible, minMinutes }))
+  }
+  const buildingStats = computeBuildingStats(school, statuses, events, when.ref, prefs.finals)
+  const recs = recommend(school, statuses, buildingStats, prefs, when)
+  return { when, statuses, buildingStats, recs }
 }

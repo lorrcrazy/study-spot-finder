@@ -41,6 +41,8 @@ export interface School {
   // Read from each school's LibCal booking form (end-time options for a free room)
   maxBookingMin: number
   slotMin: number
+  // Last day LibCal shows bookable slots for, counted from today
+  bookAheadDays: number
   buildings: Building[]
   rooms: Room[]
   events: SeedEvent[]
@@ -131,6 +133,7 @@ const georgiaTech: School = {
   timeZone: 'America/New_York',
   maxBookingMin: 120,
   slotMin: 15,
+  bookAheadDays: 14,
   buildings: gtBuildings,
   rooms: withNoise(
     gtBuildings,
@@ -207,6 +210,7 @@ const kennesaw: School = {
   timeZone: 'America/New_York',
   maxBookingMin: 120,
   slotMin: 30,
+  bookAheadDays: 7,
   buildings: ksuBuildings,
   rooms: withNoise(
     ksuBuildings,
@@ -270,6 +274,7 @@ const georgiaSouthern: School = {
   timeZone: 'America/New_York',
   maxBookingMin: 240,
   slotMin: 30,
+  bookAheadDays: 14,
   buildings: gsBuildings,
   rooms: withNoise(
     gsBuildings,

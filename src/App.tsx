@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { durationLabel, fitDuration } from './assistant'
 import { Assistant } from './components/Assistant'
 import { CampusMap } from './components/CampusMap'
 import { RoomCard } from './components/RoomCard'
-import { addMinutes, fetchLiveAvailability, formatTime, mockAvailability, nowInTz, roomStatus } from './libcal'
+import { addDays, addMinutes, dayLabel, fetchLiveAvailability, formatTime, mockAvailability, nowInTz } from './libcal'
 import type { Availability } from './libcal'
-import { busynessLabel, computeBuildingStats, eventImpact, recommend } from './scoring'
+import { busynessLabel, eventImpact, evaluate, whenLabel } from './scoring'
 import type { LiveEvent, Prefs } from './scoring'
 import { SCHOOLS } from './schools'
 import type { EventSize, Noise, School } from './schools'
@@ -27,74 +27,125 @@ function seedEvents(school: School): LiveEvent[] {
 
 const initialSchool = SCHOOLS.find((s) => s.id === new URLSearchParams(window.location.search).get('school')) ?? SCHOOLS[0]
 
+type Loaded = { availability: Availability; source: 'live' | 'demo' }
+const CACHE_MS = 2 * 60_000
+
+function timeOptions(date: string, now: string, current: string) {
+  const today = now.slice(0, 10)
+  const opts = date === today ? [{ value: 'now', label: 'Now' }, { value: 'any', label: 'Any time today' }] : [{ value: 'any', label: 'Any time' }]
+  const times = new Set<string>()
+  for (let m = 6 * 60; m < 24 * 60; m += 30) times.add(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`)
+  if (/^\d/.test(current)) times.add(current)
+  for (const t of [...times].sort()) {
+    if (`${date} ${t}:00` > now) opts.push({ value: t, label: formatTime(`${date} ${t}:00`) })
+  }
+  return opts
+}
+
 const floorName = (floor: string) => (floor === 'G' ? 'Ground' : `Floor ${floor}`)
 
 export default function App() {
   const [schoolId, setSchoolId] = useState(initialSchool.id)
   const school = SCHOOLS.find((s) => s.id === schoolId)!
-  const [availability, setAvailability] = useState<Availability | null>(null)
-  const [source, setSource] = useState<'live' | 'demo' | null>(null)
+  const [loaded, setLoaded] = useState<(Loaded & { key: string }) | null>(null)
   const [forceDemo, setForceDemo] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
   const [tick, setTick] = useState(0)
   const [events, setEvents] = useState<LiveEvent[]>(() => seedEvents(initialSchool))
-  const [prefs, setPrefs] = useState<Prefs>({ noise: 'quiet', groupSize: 1, durationMin: 120, finals: false })
+  const [prefs, setPrefs] = useState<Prefs>(() => ({
+    noise: 'quiet',
+    groupSize: 1,
+    durationMin: 120,
+    finals: false,
+    date: nowInTz(initialSchool.timeZone).slice(0, 10),
+    time: 'now',
+  }))
   const [newEvent, setNewEvent] = useState({ title: 'Pop-up club fair', buildingId: initialSchool.buildings[0].id, size: 'large' as EventSize })
+  const cache = useRef(new Map<string, { at: number; promise: Promise<Loaded> }>())
 
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), 60_000)
     return () => clearInterval(id)
   }, [])
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const now = useMemo(() => nowInTz(school.timeZone), [school, tick, refreshKey])
+  const today = now.slice(0, 10)
+  const lastDay = addDays(today, school.bookAheadDays)
+  const date = prefs.date < today ? today : prefs.date > lastDay ? lastDay : prefs.date
+  const days = Array.from({ length: school.bookAheadDays + 1 }, (_, i) => addDays(today, i))
+
+  const load = useCallback(
+    (s: School, d: string): Promise<Loaded> => {
+      const key = `${s.id}|${d}|${forceDemo}`
+      const hit = cache.current.get(key)
+      if (hit && Date.now() - hit.at < CACHE_MS) return hit.promise
+      const promise = (async (): Promise<Loaded> => {
+        if (!forceDemo) {
+          try {
+            return { availability: await fetchLiveAvailability(s, d), source: 'live' }
+          } catch (err) {
+            console.warn('Live LibCal fetch failed, using demo data', err)
+          }
+        }
+        return { availability: mockAvailability(s, d), source: 'demo' }
+      })()
+      cache.current.set(key, { at: Date.now(), promise })
+      return promise
+    },
+    [forceDemo],
+  )
+
+  const loadKey = `${school.id}|${date}|${forceDemo}|${refreshKey}`
   useEffect(() => {
     let cancelled = false
-    setAvailability(null)
-    const load = async () => {
-      if (!forceDemo) {
-        try {
-          const live = await fetchLiveAvailability(school)
-          if (!cancelled) {
-            setAvailability(live)
-            setSource('live')
-          }
-          return
-        } catch (err) {
-          console.warn('Live LibCal fetch failed, using demo data', err)
-        }
-      }
-      if (!cancelled) {
-        setAvailability(mockAvailability(school))
-        setSource('demo')
-      }
-    }
-    load()
+    load(school, date).then((r) => {
+      if (!cancelled) setLoaded({ ...r, key: loadKey })
+    })
     return () => {
       cancelled = true
     }
-  }, [school, forceDemo, refreshKey])
+  }, [school, date, load, loadKey])
+  const current = loaded?.key === loadKey ? loaded : null
+  const availability = current?.availability ?? null
+  const source = current?.source ?? null
+
+  const refresh = () => {
+    cache.current.clear()
+    setRefreshKey((k) => k + 1)
+  }
 
   const switchSchool = (next: School) => {
     setSchoolId(next.id)
-    setPrefs((p) => ({ ...p, durationMin: fitDuration(p.durationMin, next), preferBuildingId: null, avoidBuildingId: null }))
+    setPrefs((p) => ({
+      ...p,
+      durationMin: fitDuration(p.durationMin, next),
+      preferBuildingId: null,
+      avoidBuildingId: null,
+      date: p.date > addDays(today, next.bookAheadDays) ? today : p.date,
+    }))
     setEvents(seedEvents(next))
     setNewEvent((e) => ({ ...e, buildingId: next.buildings[0].id }))
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const now = useMemo(() => nowInTz(school.timeZone), [school, tick, refreshKey])
+  const pickDate = (d: string) => setPrefs((p) => ({ ...p, date: d, time: d !== today && p.time === 'now' ? 'any' : p.time }))
+  const timeOpts = timeOptions(date, now, prefs.time)
+  const timeValue = timeOpts.some((o) => o.value === prefs.time) ? prefs.time : date === today ? 'now' : 'any'
 
-  const statuses = useMemo(() => {
-    const map = new Map<number, ReturnType<typeof roomStatus>>()
-    if (availability) for (const room of school.rooms) map.set(room.eid, roomStatus(availability.get(room.eid), now))
-    return map
-  }, [availability, school, now])
-
-  const buildingStats = useMemo(
-    () => computeBuildingStats(school, statuses, events, now, prefs.finals),
-    [school, statuses, events, now, prefs.finals],
+  const evalPrefs = useMemo(() => ({ ...prefs, date }), [prefs, date])
+  const { when, statuses, buildingStats, recs } = useMemo(
+    () => evaluate(school, availability ?? new Map(), events, evalPrefs, now),
+    [school, availability, events, evalPrefs, now],
   )
-  const recs = useMemo(() => recommend(school, statuses, buildingStats, prefs), [school, statuses, buildingStats, prefs])
   const best = recs[0]
+  const label = whenLabel(when, today)
+
+  const rank = async (p: Prefs) => {
+    const d = p.date < today ? today : p.date
+    const { availability: a } = await load(school, d)
+    const r = evaluate(school, a, events, { ...p, date: d }, nowInTz(school.timeZone))
+    return { recs: r.recs, when: r.when }
+  }
 
   const nextOpening = useMemo(() => {
     if (best) return null
@@ -153,6 +204,38 @@ export default function App() {
           <section className="rounded-2xl border border-slate-200 bg-white p-5">
             <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-slate-500">What do you need?</h3>
             <div className="space-y-4">
+              <div className="text-sm">
+                <span className="font-medium">When?</span>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  <select
+                    aria-label="Day"
+                    value={date}
+                    onChange={(e) => pickDate(e.target.value)}
+                    className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+                  >
+                    {days.map((d) => (
+                      <option key={d} value={d}>
+                        {dayLabel(d, today)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Start time"
+                    value={timeValue}
+                    onChange={(e) => setPrefs((p) => ({ ...p, date, time: e.target.value }))}
+                    className="min-w-0 rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+                  >
+                    {timeOpts.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {school.shortName} lets you book up to {school.bookAheadDays} days ahead
+                </p>
+              </div>
               <div className="grid gap-2">
                 {NOISE_OPTIONS.map((o) => (
                   <button
@@ -307,7 +390,7 @@ export default function App() {
                 <input type="checkbox" checked={forceDemo} onChange={(e) => setForceDemo(e.target.checked)} />
                 Use demo data
               </label>
-              <button onClick={() => setRefreshKey((k) => k + 1)} className="rounded-lg border border-slate-300 px-3 py-1 font-medium hover:bg-white">
+              <button onClick={refresh} className="rounded-lg border border-slate-300 px-3 py-1 font-medium hover:bg-white">
                 Refresh
               </button>
             </div>
@@ -316,23 +399,23 @@ export default function App() {
           <Assistant
             key={school.id}
             school={school}
-            prefs={prefs}
-            ready={availability !== null}
-            rank={(p) => recommend(school, statuses, buildingStats, p)}
+            prefs={evalPrefs}
+            now={now}
+            rank={rank}
             onApply={setPrefs}
           />
 
           {!availability ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">Checking room availability…</div>
           ) : best ? (
-            <RoomCard school={school} rec={best} featured />
+            <RoomCard school={school} rec={best} date={date} heading={`Best spot ${label}`} featured />
           ) : (
             <div className="rounded-2xl border-2 border-dashed border-slate-300 bg-white p-6">
-              <h2 className="text-xl font-bold">No room fits right now</h2>
+              <h2 className="text-xl font-bold">No room fits {label}</h2>
               <p className="mt-1 text-slate-600">
                 {nextOpening
                   ? `Next opening for ${prefs.groupSize}: ${nextOpening.room.name} at ${formatTime(nextOpening.status!.freeFrom!)}.`
-                  : 'Nothing else opens up today. Try a smaller group or another school.'}
+                  : 'Nothing else opens up that day. Try a smaller group, another day, or another school.'}
               </p>
             </div>
           )}
@@ -373,7 +456,7 @@ export default function App() {
               <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-500">Other good options</h3>
               <div className="space-y-2">
                 {recs.slice(1, 8).map((rec) => (
-                  <RoomCard key={rec.room.eid} school={school} rec={rec} />
+                  <RoomCard key={rec.room.eid} school={school} rec={rec} date={date} />
                 ))}
               </div>
             </section>

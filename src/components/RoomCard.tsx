@@ -6,10 +6,12 @@ import type { School } from '../schools'
 interface Props {
   school: School
   rec: Recommendation
+  date: string
+  heading?: string
   featured?: boolean
 }
 
-export function RoomCard({ school, rec, featured }: Props) {
+export function RoomCard({ school, rec, date, heading = 'Best spot right now', featured }: Props) {
   const building = school.buildings.find((b) => b.id === rec.room.buildingId)!
   const tone = busynessLabel(rec.busyness)
   const floorLabel = rec.room.floor === 'G' ? 'Ground floor' : `Floor ${rec.room.floor}`
@@ -27,7 +29,7 @@ export function RoomCard({ school, rec, featured }: Props) {
         <div className="flex shrink-0 items-center gap-3">
           <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${tone.bg} ${tone.text}`}>{tone.label}</span>
           <a
-            href={bookingUrl(school, rec.room.eid)}
+            href={bookingUrl(school, rec.room.eid, date)}
             target="_blank"
             rel="noreferrer"
             className="rounded-lg border border-gt-navy px-3 py-1.5 text-sm font-semibold text-gt-navy hover:bg-gt-navy hover:text-white"
@@ -41,7 +43,7 @@ export function RoomCard({ school, rec, featured }: Props) {
 
   return (
     <div className="rounded-2xl border-2 border-gt-gold bg-gradient-to-br from-white to-amber-50 p-6 shadow-md">
-      <div className="text-xs font-bold uppercase tracking-widest text-gt-gold">Best spot right now</div>
+      <div className="text-xs font-bold uppercase tracking-widest text-gt-gold">{heading}</div>
       <div className="mt-1 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h2 className="text-3xl font-extrabold text-gt-navy">{rec.room.name}</h2>
@@ -50,7 +52,7 @@ export function RoomCard({ school, rec, featured }: Props) {
           </p>
         </div>
         <a
-          href={bookingUrl(school, rec.room.eid)}
+          href={bookingUrl(school, rec.room.eid, date)}
           target="_blank"
           rel="noreferrer"
           className="rounded-xl bg-gt-navy px-6 py-3 text-lg font-bold text-white shadow hover:bg-[#00213d]"

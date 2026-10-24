@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { durationLabel, interpret } from '../assistant'
-import { bookingUrl, formatTime } from '../libcal'
-import type { Prefs, Recommendation } from '../scoring'
+import { bookingUrl, dayLabel, formatTime } from '../libcal'
+import { whenLabel } from '../scoring'
+import type { Prefs, Recommendation, When } from '../scoring'
 import type { School } from '../schools'
 
 interface Message {
@@ -11,22 +12,23 @@ interface Message {
   text: string
   rec?: Recommendation
   alternatives?: Recommendation[]
+  date?: string
 }
 
 interface Props {
   school: School
   prefs: Prefs
-  ready: boolean
-  rank: (prefs: Prefs) => Recommendation[]
+  now: string
+  rank: (prefs: Prefs) => Promise<{ recs: Recommendation[]; when: When }>
   onApply: (prefs: Prefs) => void
 }
 
 const NOISE_TEXT = { quiet: 'quiet', moderate: 'some chatter OK', collaborative: 'group-friendly' } as const
-const EXAMPLES = ['Quiet spot to lock in for 2 hours', 'Me and 3 friends for a project, 1 hr', 'Somewhere chill but not too quiet for 45 min']
+const EXAMPLES = ['Quiet spot to lock in for 2 hours', 'Me and 3 friends for a project on Wednesday at 3pm', 'Somewhere chill tomorrow afternoon for 45 min']
 
 let nextId = 1
 
-export function Assistant({ school, prefs, ready, rank, onApply }: Props) {
+export function Assistant({ school, prefs, now, rank, onApply }: Props) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [thinking, setThinking] = useState(false)
@@ -42,18 +44,21 @@ export function Assistant({ school, prefs, ready, rank, onApply }: Props) {
     setInput('')
     setMessages((m) => [...m, { id: nextId++, role: 'user', text: message }])
     setThinking(true)
-    const { patch, note } = await interpret(message, school, prefs)
+    const { patch, note } = await interpret(message, school, prefs, now)
     const next: Prefs = { ...prefs, ...patch }
     if (next.preferBuildingId && next.preferBuildingId === next.avoidBuildingId) {
       if (patch.avoidBuildingId) next.preferBuildingId = null
       else next.avoidBuildingId = null
     }
     onApply(next)
-    const recs = rank(next)
+    const { recs, when } = await rank(next)
+    const today = now.slice(0, 10)
+    const label = whenLabel(when, today)
     const best = recs[0]
     const place = school.buildings.find((b) => b.id === next.preferBuildingId)?.name
     const avoid = school.buildings.find((b) => b.id === next.avoidBuildingId)?.name
     const understood = [
+      label,
       NOISE_TEXT[next.noise],
       next.groupSize === 1 ? 'just you' : `${next.groupSize} people`,
       durationLabel(next.durationMin),
@@ -64,17 +69,20 @@ export function Assistant({ school, prefs, ready, rank, onApply }: Props) {
       .join(' · ')
     const nothingParsed = Object.keys(patch).length === 0
     let reply = nothingParsed
-      ? `I couldn't pick out what you need, so I kept your filters (${understood}). Try something like "quiet room for 2 people for an hour".`
+      ? `I couldn't pick out what you need, so I kept your filters (${understood}). Try something like "quiet room for 2 people Wednesday at 3pm".`
       : `Got it: ${understood}.`
     if (note) reply += ` ${note}`
-    if (!ready) reply += ' Still loading room availability, give me a sec and ask again.'
-    else if (best) {
+    if (best) {
       const building = school.buildings.find((b) => b.id === best.room.buildingId)!
-      if (place && best.room.buildingId !== next.preferBuildingId) reply += ` Nothing in ${place} fits that well right now.`
-      reply += ` Head to ${best.room.name} in ${building.name}: ${best.reasons[0].toLowerCase()}, ${best.reasons[2].toLowerCase()}, free until ${formatTime(best.status.freeUntil!)}.`
+      const from = formatTime(best.status.freeFrom!)
+      const until = formatTime(best.status.freeUntil!)
+      if (place && best.room.buildingId !== next.preferBuildingId) reply += ` Nothing in ${place} fits that well ${label}.`
+      reply += ` Head to ${best.room.name} in ${building.name}: ${best.reasons[0].toLowerCase()}, ${best.reasons[2].toLowerCase()}, ${when.isNow ? `free until ${until}` : `free ${from}–${until}`}.`
       if (best.warnings.length) reply += ` Heads up: ${best.warnings[0]}.`
-    } else reply += ` Nothing at ${school.shortName} fits that right now. Try fewer people or a shorter block.`
-    setMessages((m) => [...m, { id: nextId++, role: 'assistant', text: reply, rec: ready ? best : undefined, alternatives: ready ? recs.slice(1, 3) : [] }])
+      const day = dayLabel(when.date, today)
+      if (!when.isNow) reply += ` Book opens LibCal on ${/^(Today|Tomorrow)$/.test(day) ? day.toLowerCase() : day}; tap the ${from} slot.`
+    } else reply += ` Nothing at ${school.shortName} fits that ${label}. Try fewer people, a shorter block, or another time.`
+    setMessages((m) => [...m, { id: nextId++, role: 'assistant', text: reply, rec: best, alternatives: recs.slice(1, 3), date: when.date }])
     setThinking(false)
   }
 
@@ -89,7 +97,7 @@ export function Assistant({ school, prefs, ready, rank, onApply }: Props) {
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gt-navy text-sm font-bold text-gt-gold">AI</span>
         <div>
           <h3 className="font-bold text-gt-navy">Study spot assistant</h3>
-          <p className="text-xs text-slate-500">Describe the room and vibe you want. I'll find the best open room at {school.shortName}.</p>
+          <p className="text-xs text-slate-500">Describe the room and vibe you want. Ask for a day and time too, up to {school.bookAheadDays} days ahead at {school.shortName}.</p>
         </div>
       </div>
 
@@ -105,7 +113,7 @@ export function Assistant({ school, prefs, ready, rank, onApply }: Props) {
                 <p>{m.text}</p>
                 {m.rec && (
                   <a
-                    href={bookingUrl(school, m.rec.room.eid)}
+                    href={bookingUrl(school, m.rec.room.eid, m.date)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-block rounded-lg bg-gt-navy px-3 py-1.5 font-semibold text-white hover:bg-[#00213d]"
@@ -119,7 +127,7 @@ export function Assistant({ school, prefs, ready, rank, onApply }: Props) {
                     {m.alternatives.map((alt) => (
                       <a
                         key={alt.room.eid}
-                        href={bookingUrl(school, alt.room.eid)}
+                        href={bookingUrl(school, alt.room.eid, m.date)}
                         target="_blank"
                         rel="noreferrer"
                         className="rounded-md border border-slate-300 bg-white px-2 py-0.5 font-medium text-gt-navy hover:border-gt-navy"
