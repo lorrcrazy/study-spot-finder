@@ -13,7 +13,8 @@ const NOISE_OPTIONS: { value: Noise; label: string }[] = [
   { value: 'moderate', label: 'Some chatter OK' },
   { value: 'collaborative', label: 'Group work' },
 ]
-const SLOT_MIN = 15
+const fitDuration = (min: number, school: School) =>
+  Math.min(school.maxBookingMin, Math.max(school.slotMin, Math.round(min / school.slotMin) * school.slotMin))
 const SIZES: EventSize[] = ['small', 'medium', 'large']
 
 function seedEvents(school: School): LiveEvent[] {
@@ -79,7 +80,7 @@ export default function App() {
 
   const switchSchool = (next: School) => {
     setSchoolId(next.id)
-    setPrefs((p) => ({ ...p, durationMin: Math.min(p.durationMin, next.maxBookingMin) }))
+    setPrefs((p) => ({ ...p, durationMin: fitDuration(p.durationMin, next) }))
     setEvents(seedEvents(next))
     setNewEvent((e) => ({ ...e, buildingId: next.buildings[0].id }))
   }
@@ -183,14 +184,14 @@ export default function App() {
                 <span className="font-medium">How long? {durationLabel(prefs.durationMin)}</span>
                 <input
                   type="range"
-                  min={SLOT_MIN}
+                  min={school.slotMin}
                   max={school.maxBookingMin}
-                  step={SLOT_MIN}
+                  step={school.slotMin}
                   value={prefs.durationMin}
                   onChange={(e) => setPrefs((p) => ({ ...p, durationMin: Number(e.target.value) }))}
                   className="mt-1 w-full accent-[#003057]"
                 />
-                <p className="mt-1 text-xs text-slate-500">Max booking at {school.shortName}: {durationLabel(school.maxBookingMin)} · {SLOT_MIN}-min slots</p>
+                <p className="mt-1 text-xs text-slate-500">Max booking at {school.shortName}: {durationLabel(school.maxBookingMin)} · {school.slotMin}-min slots</p>
               </label>
               <label className="flex items-center gap-2 text-sm">
                 <input

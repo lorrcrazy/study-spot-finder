@@ -38,7 +38,9 @@ export interface School {
   lid: number
   gid: number
   timeZone: string
+  // Read from each school's LibCal booking form (end-time options for a free room)
   maxBookingMin: number
+  slotMin: number
   buildings: Building[]
   rooms: Room[]
   events: SeedEvent[]
@@ -128,6 +130,7 @@ const georgiaTech: School = {
   gid: 39399,
   timeZone: 'America/New_York',
   maxBookingMin: 120,
+  slotMin: 15,
   buildings: gtBuildings,
   rooms: withNoise(
     gtBuildings,
@@ -203,6 +206,7 @@ const kennesaw: School = {
   gid: 19509,
   timeZone: 'America/New_York',
   maxBookingMin: 120,
+  slotMin: 30,
   buildings: ksuBuildings,
   rooms: withNoise(
     ksuBuildings,
@@ -264,7 +268,8 @@ const georgiaSouthern: School = {
   lid: 2839,
   gid: 12909,
   timeZone: 'America/New_York',
-  maxBookingMin: 120,
+  maxBookingMin: 240,
+  slotMin: 30,
   buildings: gsBuildings,
   rooms: withNoise(
     gsBuildings,

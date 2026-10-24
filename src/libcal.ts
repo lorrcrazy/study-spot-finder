@@ -95,10 +95,12 @@ export function mockAvailability(school: School): Availability {
     const random = seededRandom(room.eid * 31 + daySeed)
     const slots: Slot[] = []
     let bookedRemaining = 0
-    for (let i = 8 * 4; i < 24 * 4; i++) {
-      if (bookedRemaining === 0 && random() < 0.1) bookedRemaining = 4 + Math.floor(random() * 9)
-      const start = addMinutes(`${today} 00:00:00`, i * 15)
-      slots.push({ start, end: addMinutes(start, 15), booked: bookedRemaining > 0 })
+    const step = school.slotMin
+    const perHour = 60 / step
+    for (let i = 8 * perHour; i < 24 * perHour; i++) {
+      if (bookedRemaining === 0 && random() < 0.1) bookedRemaining = Math.ceil((60 + random() * 120) / step)
+      const start = addMinutes(`${today} 00:00:00`, i * step)
+      slots.push({ start, end: addMinutes(start, step), booked: bookedRemaining > 0 })
       if (bookedRemaining > 0) bookedRemaining--
     }
     availability.set(room.eid, slots)
