@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { durationLabel, fitDuration } from './assistant'
+import { Assistant } from './components/Assistant'
 import { CampusMap } from './components/CampusMap'
 import { RoomCard } from './components/RoomCard'
 import { addMinutes, fetchLiveAvailability, formatTime, mockAvailability, nowInTz, roomStatus } from './libcal'
@@ -13,8 +15,6 @@ const NOISE_OPTIONS: { value: Noise; label: string }[] = [
   { value: 'moderate', label: 'Some chatter OK' },
   { value: 'collaborative', label: 'Group work' },
 ]
-const fitDuration = (min: number, school: School) =>
-  Math.min(school.maxBookingMin, Math.max(school.slotMin, Math.round(min / school.slotMin) * school.slotMin))
 const SIZES: EventSize[] = ['small', 'medium', 'large']
 
 function seedEvents(school: School): LiveEvent[] {
@@ -28,11 +28,6 @@ function seedEvents(school: School): LiveEvent[] {
 const initialSchool = SCHOOLS.find((s) => s.id === new URLSearchParams(window.location.search).get('school')) ?? SCHOOLS[0]
 
 const floorName = (floor: string) => (floor === 'G' ? 'Ground' : `Floor ${floor}`)
-const durationLabel = (min: number) => {
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return [h ? `${h} hr` : '', m ? `${m} min` : ''].filter(Boolean).join(' ')
-}
 
 export default function App() {
   const [schoolId, setSchoolId] = useState(initialSchool.id)
@@ -80,7 +75,7 @@ export default function App() {
 
   const switchSchool = (next: School) => {
     setSchoolId(next.id)
-    setPrefs((p) => ({ ...p, durationMin: fitDuration(p.durationMin, next) }))
+    setPrefs((p) => ({ ...p, durationMin: fitDuration(p.durationMin, next), preferBuildingId: null, avoidBuildingId: null }))
     setEvents(seedEvents(next))
     setNewEvent((e) => ({ ...e, buildingId: next.buildings[0].id }))
   }
@@ -193,6 +188,26 @@ export default function App() {
                 />
                 <p className="mt-1 text-xs text-slate-500">Max booking at {school.shortName}: {durationLabel(school.maxBookingMin)} · {school.slotMin}-min slots</p>
               </label>
+              <label className="block text-sm">
+                <span className="font-medium">Where?</span>
+                <select
+                  value={prefs.preferBuildingId ?? ''}
+                  onChange={(e) => setPrefs((p) => ({ ...p, preferBuildingId: e.target.value || null }))}
+                  className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm"
+                >
+                  <option value="">Anywhere</option>
+                  {school.buildings.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </select>
+                {prefs.avoidBuildingId && (
+                  <button onClick={() => setPrefs((p) => ({ ...p, avoidBuildingId: null }))} className="mt-1 text-xs text-slate-500 hover:text-rose-600">
+                    Avoiding {school.buildings.find((b) => b.id === prefs.avoidBuildingId)?.name} ✕
+                  </button>
+                )}
+              </label>
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -297,6 +312,15 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          <Assistant
+            key={school.id}
+            school={school}
+            prefs={prefs}
+            ready={availability !== null}
+            rank={(p) => recommend(school, statuses, buildingStats, p)}
+            onApply={setPrefs}
+          />
 
           {!availability ? (
             <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-slate-500">Checking room availability…</div>

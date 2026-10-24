@@ -7,6 +7,8 @@ export interface Prefs {
   groupSize: number
   durationMin: number
   finals: boolean
+  preferBuildingId?: string | null
+  avoidBuildingId?: string | null
 }
 
 export interface LiveEvent {
@@ -128,7 +130,8 @@ export function recommend(
     const covers = status.freeMinutes >= wanted
     const durationScore = covers ? 20 : Math.round((20 * status.freeMinutes) / wanted) - 10
     const waste = Math.min(15, (room.capacity - prefs.groupSize) * 1.5)
-    const score = 100 - busyness * 0.9 + NOISE_MATCH[prefs.noise][room.noise] + durationScore - waste
+    const placeScore = (room.buildingId === prefs.preferBuildingId ? 20 : 0) - (room.buildingId === prefs.avoidBuildingId ? 60 : 0)
+    const score = 100 - busyness * 0.9 + NOISE_MATCH[prefs.noise][room.noise] + durationScore - waste + placeScore
 
     const reasons = [
       NOISE_LABEL[room.noise],
